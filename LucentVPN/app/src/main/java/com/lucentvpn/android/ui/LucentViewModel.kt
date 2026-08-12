@@ -64,6 +64,14 @@ class LucentViewModel(application: Application) : AndroidViewModel(application) 
 
     val isOnline: StateFlow<Boolean> get() = app.networkMonitor.isOnline
 
+    // ---- Relay provider metadata, surfaced in Settings ---------------------
+    // Read through the repository's ServerSource rather than hardcoded, so
+    // swapping providers updates the UI with no changes here.
+
+    val relaySourceName: String get() = repository.source.displayName
+    val relaySourceUrl: String get() = repository.source.infoUrl
+    val relayTrustNotice: String get() = repository.source.trustNotice
+
     /**
      * Relays ranked for display, with favourites hoisted to the top.
      *
