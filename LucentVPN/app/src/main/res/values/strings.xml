@@ -6,12 +6,17 @@
     <string name="state_ready">Not connected</string>
     <string name="state_connected">Protected</string>
     <string name="state_disconnecting">Disconnecting</string>
+    <string name="state_checking_network">Checking your network</string>
+    <string name="state_refreshing">Refreshing relays</string>
     <string name="state_selecting">Choosing the fastest relay</string>
     <string name="state_awaiting_permission">Waiting for your permission</string>
+    <string name="state_preparing_profile">Preparing secure profile</string>
     <string name="state_starting_engine">Starting tunnel</string>
     <string name="state_contacting">Contacting relay</string>
     <string name="state_authenticating">Negotiating encryption</string>
     <string name="state_establishing">Establishing tunnel</string>
+    <string name="state_verifying">Verifying tunnel protection</string>
+    <string name="state_retrying">Trying another relay</string>
 
     <!-- Actions -->
     <string name="action_connect">Connect</string>
@@ -44,6 +49,7 @@
     <string name="servers_search_hint">Search country or host</string>
     <string name="servers_count">%1$d relays available</string>
     <string name="servers_updated">Updated %1$s</string>
+    <string name="servers_stale_warning">Using a saved relay list while a fresh copy is fetched.</string>
     <string name="servers_favourite_add">Add to favourites</string>
     <string name="servers_favourite_remove">Remove from favourites</string>
 

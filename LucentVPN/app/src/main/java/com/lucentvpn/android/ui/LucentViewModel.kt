@@ -54,6 +54,8 @@ class LucentViewModel(application: Application) : AndroidViewModel(application) 
 
     val servers: StateFlow<List<VpnServer>> get() = repository.servers
     val lastRefreshAt: StateFlow<Long> get() = repository.lastRefreshAt
+    val cacheFreshness: StateFlow<com.lucentvpn.android.data.ServerRepository.CacheFreshness>
+        get() = repository.cacheFreshness
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()

@@ -10,6 +10,7 @@ import com.lucentvpn.android.data.model.VpnServer
 import com.lucentvpn.android.data.source.ServerSourceException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -39,6 +41,7 @@ class VpnConnectionManager(
     private val repository: ServerRepository,
     private val settings: SettingsStore,
     private val networkMonitor: NetworkMonitor,
+    private val tunnelVerifier: TunnelVerifier,
 ) {
 
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -64,6 +67,10 @@ class VpnConnectionManager(
 
     private var activeJob: Job? = null
 
+    /** Monotonic command token. Work from an older command may never publish state. */
+    @Volatile
+    private var lifecycleGeneration = 0L
+
     /** The relay we are currently on or were last on, for reconnects. */
     @Volatile
     private var currentServer: VpnServer? = null
@@ -88,37 +95,48 @@ class VpnConnectionManager(
      *   automatic/fastest selection.
      */
     fun connect(pinnedServerId: String? = null) {
+        val generation = ++lifecycleGeneration
+        userInitiatedDisconnect = false
+        pendingConsent?.cancel()
+        pendingConsent = null
         activeJob?.cancel()
         activeJob = scope.launch {
             connectMutex.withLock {
-                if (_state.value is ConnectionState.Connected ||
-                    _state.value is ConnectionState.Connecting ||
+                if (generation != lifecycleGeneration) return@withLock
+                if (_state.value !is ConnectionState.Idle ||
                     engine.engineState.value !is VpnEngine.EngineState.Stopped
                 ) {
-                    userInitiatedDisconnect = true
                     _state.value = ConnectionState.Disconnecting
                     engine.stop()
-                    withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
+                    val stopped = withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
                         engine.engineState.first { it is VpnEngine.EngineState.Stopped }
+                        true
+                    } ?: false
+                    if (!stopped) {
+                        fail(VpnError.TUNNEL_INIT_FAILED, currentServer, generation)
+                        return@withLock
                     }
                 }
-                runConnect(pinnedServerId)
+                runConnect(pinnedServerId, generation)
             }
         }
     }
 
     fun disconnect() {
+        val generation = ++lifecycleGeneration
         userInitiatedDisconnect = true
+        pendingConsent?.cancel()
+        pendingConsent = null
         activeJob?.cancel()
         activeJob = scope.launch {
             connectMutex.withLock {
+                if (generation != lifecycleGeneration) return@withLock
                 _state.value = ConnectionState.Disconnecting
                 engine.stop()
-                // Wait for the engine to actually report it is down, but never hang
-                // the UI on a wedged engine.
                 withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
                     engine.engineState.first { it is VpnEngine.EngineState.Stopped }
                 }
+                if (generation != lifecycleGeneration) return@withLock
                 currentServer = null
                 _state.value = ConnectionState.Idle
             }
@@ -155,19 +173,28 @@ class VpnConnectionManager(
     // Attempt sequence
     // -----------------------------------------------------------------------
 
-    private suspend fun runConnect(pinnedServerId: String?) {
+    private suspend fun runConnect(pinnedServerId: String?, generation: Long) {
+        if (generation != lifecycleGeneration) return
         userInitiatedDisconnect = false
+        _state.value = ConnectionState.Connecting(
+            server = null,
+            stage = ConnectionState.Connecting.Stage.CHECKING_NETWORK,
+        )
 
         // 1. Refuse up front rather than failing three relays deep.
         if (!networkMonitor.queryOnline()) {
-            fail(VpnError.NO_NETWORK, null)
+            fail(VpnError.NO_NETWORK, null, generation)
             return
         }
 
         // 2. Make sure we have relays to choose from.
         _state.value = ConnectionState.Connecting(
             server = null,
-            stage = ConnectionState.Connecting.Stage.SELECTING_SERVER,
+            stage = if (repository.servers.value.isEmpty() || repository.isStale) {
+                ConnectionState.Connecting.Stage.REFRESHING_SERVERS
+            } else {
+                ConnectionState.Connecting.Stage.SELECTING_SERVER
+            },
         )
 
         if (repository.servers.value.isEmpty() || repository.isStale) {
@@ -210,10 +237,10 @@ class VpnConnectionManager(
         val attempts = minOf(candidates.size, MAX_ATTEMPTS)
 
         for ((index, server) in candidates.take(attempts).withIndex()) {
-            val error = attemptOne(server, index + 1, attempts)
+            if (generation != lifecycleGeneration) return
+            val error = attemptOne(server, index + 1, attempts, generation)
 
-            if (error == null) {
-                // Tunnel is genuinely up.
+            if (error == null && generation == lifecycleGeneration) {
                 repository.markSucceeded(server)
                 currentServer = server
                 _state.value = ConnectionState.Connected(
@@ -223,8 +250,9 @@ class VpnConnectionManager(
                 return
             }
 
+            if (generation != lifecycleGeneration) return
             Log.w(TAG, "Relay ${server.hostName} failed: $error")
-            repository.markFailed(server)
+            repository.markFailed(server, error ?: VpnError.UNKNOWN)
 
             // Some failures are about us, not the relay: trying another relay
             // would only repeat the same outcome.
@@ -239,6 +267,14 @@ class VpnConnectionManager(
 
             // Make sure the failed attempt is fully torn down before redialing,
             // otherwise the next start races the old session.
+            if (index + 1 < attempts) {
+                _state.value = ConnectionState.Connecting(
+                    server = server,
+                    stage = ConnectionState.Connecting.Stage.RETRYING,
+                    attempt = index + 2,
+                    totalAttempts = attempts,
+                )
+            }
             engine.stop()
             withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
                 engine.engineState.first { it is VpnEngine.EngineState.Stopped }
@@ -257,7 +293,9 @@ class VpnConnectionManager(
         server: VpnServer,
         attempt: Int,
         totalAttempts: Int,
+        generation: Long,
     ): VpnError? {
+        if (generation != lifecycleGeneration) return VpnError.UNKNOWN
         _state.value = ConnectionState.Connecting(
             server = server,
             stage = ConnectionState.Connecting.Stage.STARTING_ENGINE,
@@ -266,6 +304,12 @@ class VpnConnectionManager(
         )
 
         val current = settings.settings.first()
+        _state.value = ConnectionState.Connecting(
+            server = server,
+            stage = ConnectionState.Connecting.Stage.PREPARING_PROFILE,
+            attempt = attempt,
+            totalAttempts = totalAttempts,
+        )
 
         try {
             engine.start(
@@ -313,13 +357,19 @@ class VpnConnectionManager(
             result
         }
 
-        return when {
-            // withTimeoutOrNull returned because time ran out.
-            verdict == null && engine.engineState.value !is VpnEngine.EngineState.Connected ->
-                VpnError.TIMEOUT
-
-            else -> verdict
+        if (generation != lifecycleGeneration) return VpnError.UNKNOWN
+        if (verdict == null && engine.engineState.value !is VpnEngine.EngineState.Connected) {
+            return VpnError.TIMEOUT
         }
+        if (verdict != null) return verdict
+
+        _state.value = ConnectionState.Connecting(
+            server = server,
+            stage = ConnectionState.Connecting.Stage.VERIFYING_TUNNEL,
+            attempt = attempt,
+            totalAttempts = totalAttempts,
+        )
+        return if (tunnelVerifier.awaitVerified()) null else VpnError.TUNNEL_INIT_FAILED
     }
 
     private fun publishProgress(
@@ -380,7 +430,12 @@ class VpnConnectionManager(
         }
     }
 
-    private fun fail(error: VpnError, server: VpnServer?) {
+    private fun fail(
+        error: VpnError,
+        server: VpnServer?,
+        generation: Long = lifecycleGeneration,
+    ) {
+        if (generation != lifecycleGeneration) return
         Log.w(TAG, "Connection failed: $error")
         _state.value = ConnectionState.Failed(error, server)
     }
@@ -425,10 +480,12 @@ class VpnConnectionManager(
      * cellular; it stalls without reporting an error. Re-dialing on the change
      * is the only reliable recovery.
      */
+    @OptIn(FlowPreview::class)
     private fun observeNetworkChanges() {
         scope.launch {
             networkMonitor.underlyingNetworkChanges
                 .drop(1) // ignore the initial value
+                .debounce(NETWORK_CHANGE_DEBOUNCE_MS)
                 .collect {
                     val connected = _state.value as? ConnectionState.Connected ?: return@collect
                     if (!settings.settings.first().autoReconnect) return@collect
@@ -446,6 +503,7 @@ class VpnConnectionManager(
         const val CONNECT_TIMEOUT_MS = 30_000L
         const val DISCONNECT_TIMEOUT_MS = 5_000L
         const val CONSENT_TIMEOUT_MS = 120_000L
+        const val NETWORK_CHANGE_DEBOUNCE_MS = 1_500L
 
         /** How many relays we will burn through before telling the user. */
         const val MAX_ATTEMPTS = 4

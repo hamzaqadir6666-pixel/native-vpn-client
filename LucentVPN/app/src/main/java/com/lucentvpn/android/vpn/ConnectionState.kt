@@ -27,34 +27,33 @@ sealed interface ConnectionState {
     ) : ConnectionState {
 
         enum class Stage {
-            /** Fetching or ranking relays. */
+            CHECKING_NETWORK,
+            REFRESHING_SERVERS,
             SELECTING_SERVER,
-
-            /** Waiting on the system VPN consent dialog. */
             AWAITING_PERMISSION,
-
-            /** Handing the profile to the tunnel engine. */
+            PREPARING_PROFILE,
             STARTING_ENGINE,
-
-            /** TCP/UDP session opened, no OpenVPN reply yet. */
             CONTACTING_SERVER,
-
-            /** Server replied; TLS and key negotiation in progress. */
             AUTHENTICATING,
-
-            /** Interface configured, routes being applied. */
             ESTABLISHING_TUNNEL,
+            VERIFYING_TUNNEL,
+            RETRYING,
         }
 
         /** Coarse progress for the ring animation, 0f..1f. */
         val progress: Float
             get() = when (stage) {
-                Stage.SELECTING_SERVER -> 0.10f
-                Stage.AWAITING_PERMISSION -> 0.20f
-                Stage.STARTING_ENGINE -> 0.35f
-                Stage.CONTACTING_SERVER -> 0.55f
-                Stage.AUTHENTICATING -> 0.75f
-                Stage.ESTABLISHING_TUNNEL -> 0.92f
+                Stage.CHECKING_NETWORK -> 0.05f
+                Stage.REFRESHING_SERVERS -> 0.12f
+                Stage.SELECTING_SERVER -> 0.20f
+                Stage.AWAITING_PERMISSION -> 0.28f
+                Stage.PREPARING_PROFILE -> 0.36f
+                Stage.STARTING_ENGINE -> 0.44f
+                Stage.CONTACTING_SERVER -> 0.58f
+                Stage.AUTHENTICATING -> 0.72f
+                Stage.ESTABLISHING_TUNNEL -> 0.86f
+                Stage.VERIFYING_TUNNEL -> 0.95f
+                Stage.RETRYING -> 0.18f
             }
     }
 

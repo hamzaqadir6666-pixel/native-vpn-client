@@ -91,6 +91,8 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
             if (_engineState.value is VpnEngine.EngineState.Stopped ||
                 _engineState.value is VpnEngine.EngineState.Failed
             ) {
+                activeProfileUuid = null
+                callbackProfileUuid = null
                 _stats.value = TunnelStats()
                 lastByteCountAt = 0L
             }
@@ -321,12 +323,9 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
 
     override fun stop() {
         stopRequested = true
-        activeProfileUuid = null
-        callbackProfileUuid = null
-        lastByteCountAt = 0L
-        _stats.value = TunnelStats()
-        _engineState.value = VpnEngine.EngineState.Stopped
 
+        // Do not publish Stopped or clear counters optimistically. The service
+        // callback is authoritative; callers wait for that terminal event.
         ProfileManager.setConntectedVpnProfileDisconnected(appContext)
 
         // The service exposes an AIDL binder for in-process control. Binding is
