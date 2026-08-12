@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Compose draws the entire UI, so these XML themes exist only to control
+        the window before the first frame. Keeping the window background equal
+        to the Compose canvas colour is what prevents a white flash on launch.
+    -->
+    <style name="Theme.LucentVPN" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Applied to MainActivity so the launch window is already correct. -->
+    <style name="Theme.LucentVPN.Splash" parent="Theme.LucentVPN" />
+
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The launch window is dark in both system modes on purpose: the app's
+        own dark canvas is the default, and matching it here avoids a flash
+        for the majority case. Compose still honours the user's theme setting
+        for the actual UI.
+    -->
+    <color name="window_background">#0B111A</color>
+</resources>

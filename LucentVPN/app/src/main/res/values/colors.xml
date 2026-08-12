@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches LucentColors.DeepInk in the Compose theme. -->
+    <color name="window_background">#0B111A</color>
+    <color name="ic_launcher_background">#0B111A</color>
+</resources>

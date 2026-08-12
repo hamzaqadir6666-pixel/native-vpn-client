@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lucent VPN</string>
+
+    <!-- Connection states -->
+    <string name="state_ready">Not connected</string>
+    <string name="state_connected">Protected</string>
+    <string name="state_disconnecting">Disconnecting</string>
+    <string name="state_selecting">Choosing the fastest relay</string>
+    <string name="state_awaiting_permission">Waiting for your permission</string>
+    <string name="state_starting_engine">Starting tunnel</string>
+    <string name="state_contacting">Contacting relay</string>
+    <string name="state_authenticating">Negotiating encryption</string>
+    <string name="state_establishing">Establishing tunnel</string>
+
+    <!-- Actions -->
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_retry">Try again</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="action_change_server">Change relay</string>
+    <string name="action_refresh">Refresh relays</string>
+    <string name="action_back">Back</string>
+
+    <!-- Home -->
+    <string name="home_title">Lucent</string>
+    <string name="home_auto_relay">Fastest available</string>
+    <string name="home_stat_download">Download</string>
+    <string name="home_stat_upload">Upload</string>
+    <string name="home_stat_duration">Duration</string>
+    <string name="home_stat_transferred">Transferred</string>
+    <string name="home_tap_to_connect">Tap to connect</string>
+    <string name="home_tap_to_disconnect">Tap to disconnect</string>
+
+    <!-- Server list -->
+    <string name="servers_title">Relays</string>
+    <string name="servers_auto_title">Automatic</string>
+    <string name="servers_auto_subtitle">Let Lucent pick the fastest relay each time</string>
+    <string name="servers_favourites">Favourites</string>
+    <string name="servers_all">All relays</string>
+    <string name="servers_empty">No relays yet</string>
+    <string name="servers_empty_hint">Pull to refresh once you are online.</string>
+    <string name="servers_search_hint">Search country or host</string>
+    <string name="servers_count">%1$d relays available</string>
+    <string name="servers_updated">Updated %1$s</string>
+    <string name="servers_favourite_add">Add to favourites</string>
+    <string name="servers_favourite_remove">Remove from favourites</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_connection">Connection</string>
+    <string name="settings_section_network">Network</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_auto_connect">Connect on launch</string>
+    <string name="settings_auto_connect_summary">Start a tunnel as soon as Lucent opens</string>
+    <string name="settings_auto_reconnect">Reconnect automatically</string>
+    <string name="settings_auto_reconnect_summary">Re-dial if the tunnel drops or the network changes</string>
+    <string name="settings_start_on_boot">Connect after restart</string>
+    <string name="settings_start_on_boot_summary">Requires permission to already be granted</string>
+    <string name="settings_custom_dns">Custom DNS</string>
+    <string name="settings_custom_dns_summary">Send queries to your own resolvers inside the tunnel</string>
+    <string name="settings_dns_primary">Primary resolver</string>
+    <string name="settings_dns_secondary">Secondary resolver</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">Follow system</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_relay_source">Relay source</string>
+    <string name="settings_licence">Licences</string>
+    <string name="settings_licence_summary">Tunnel provided by ics-openvpn (GPLv2)</string>
+
+    <!-- Errors -->
+    <string name="error_permission_denied">Lucent needs VPN permission to create a tunnel.</string>
+    <string name="error_permission_revoked">Another VPN app is currently active. Disconnect it and try again.</string>
+    <string name="error_no_servers">No relays are available right now.</string>
+    <string name="error_all_failed">Every relay we tried refused the connection.</string>
+    <string name="error_timeout">The relay did not respond in time.</string>
+    <string name="error_auth_failed">The relay rejected our credentials.</string>
+    <string name="error_unsupported_config">This relay uses settings Lucent cannot handle.</string>
+    <string name="error_tunnel_init">Android would not create the tunnel interface.</string>
+    <string name="error_dropped">The connection dropped.</string>
+    <string name="error_no_network">You are offline.</string>
+    <string name="error_background_restricted">Android blocked the tunnel service. Check battery restrictions for Lucent.</string>
+    <string name="error_server_list">Could not reach the relay directory.</string>
+    <string name="error_unknown">Something went wrong.</string>
+
+    <!-- Notification permission rationale -->
+    <string name="notification_rationale">Android shows a permanent notification while a VPN is active. Allow notifications so you can see and control the tunnel.</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_settings">Open settings</string>
+    <string name="cd_connection_button">Connection toggle</string>
+    <string name="cd_signal_quality">Signal quality: %1$s</string>
+</resources>
