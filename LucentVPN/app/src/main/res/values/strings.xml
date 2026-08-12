@@ -40,7 +40,7 @@
     <string name="servers_favourites">Favourites</string>
     <string name="servers_all">All relays</string>
     <string name="servers_empty">No relays yet</string>
-    <string name="servers_empty_hint">Pull to refresh once you are online.</string>
+    <string name="servers_empty_hint">Tap refresh once you are online.</string>
     <string name="servers_search_hint">Search country or host</string>
     <string name="servers_count">%1$d relays available</string>
     <string name="servers_updated">Updated %1$s</string>

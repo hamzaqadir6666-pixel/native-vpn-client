@@ -58,7 +58,6 @@ class LucentApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
 
         // ics-openvpn requires both of these before a tunnel is started.
         //
@@ -106,16 +105,7 @@ class LucentApp : Application() {
         connectionManager.connect(settings.pinnedServerId)
     }
 
-    companion object {
-        private const val TAG = "LucentApp"
-
-        /**
-         * Set in [onCreate], which the framework guarantees runs before any
-         * component of this process. Used only by [com.lucentvpn.android.vpn.BootReceiver],
-         * which has no other handle on the graph.
-         */
-        @Volatile
-        lateinit var instance: LucentApp
-            private set
+    private companion object {
+        const val TAG = "LucentApp"
     }
 }
