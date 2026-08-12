@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        The tunnel runs as a foreground service. VpnService-backed services are
+        system-exempted from the API 34 foreground-service type restrictions;
+        the ics-openvpn service declares that type, so we must hold the matching
+        permission in the merged manifest.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".LucentApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LucentVPN"
+        tools:replace="android:label,android:icon,android:roundIcon,android:theme,android:allowBackup,android:fullBackupContent,android:name">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.LucentVPN.Splash"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".vpn.BootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            ================================================================
+            ics-openvpn manifest reconciliation
+            ================================================================
+            The :openvpn module ships a complete standalone application
+            manifest. Merging it as-is would install a second launcher icon
+            and a second settings UI alongside ours, so we drop the parts of
+            it that are only meaningful for the standalone ics-openvpn app.
+
+            Everything the tunnel actually needs is kept:
+              - de.blinkt.openvpn.core.OpenVPNService  (the VpnService)
+              - de.blinkt.openvpn.LaunchVPN            (consent + launch)
+              - de.blinkt.openvpn.activities.DisconnectVPN (notification action)
+              - de.blinkt.openvpn.api.*                (remote control binder)
+        -->
+        <activity
+            android:name="de.blinkt.openvpn.activities.MainActivity"
+            tools:node="remove" />
+        <activity
+            android:name="de.blinkt.openvpn.activities.OpenSSLSpeed"
+            tools:node="remove" />
+        <activity
+            android:name="de.blinkt.openvpn.activities.CreateShortcuts"
+            tools:node="remove" />
+
+        <!--
+            The API service lets *other* apps drive this VPN. We do not want a
+            third-party app controlling the user's tunnel, so it is removed.
+        -->
+        <service
+            android:name="de.blinkt.openvpn.api.ExternalOpenVPNService"
+            tools:node="remove" />
+        <activity
+            android:name="de.blinkt.openvpn.api.ConfirmDialog"
+            tools:node="remove" />
+        <activity
+            android:name="de.blinkt.openvpn.api.RemoteAction"
+            tools:node="remove" />
+        <activity
+            android:name="de.blinkt.openvpn.api.GrantPermissionsActivity"
+            tools:node="remove" />
+    </application>
+
+</manifest>
