@@ -86,7 +86,12 @@ data class TunnelStats(
     val downstreamBps: Long = 0,
     val upstreamBps: Long = 0,
 ) {
-    val totalBytes: Long get() = bytesIn + bytesOut
+    val totalBytes: Long
+        get() = if (Long.MAX_VALUE - bytesIn.coerceAtLeast(0) < bytesOut.coerceAtLeast(0)) {
+            Long.MAX_VALUE
+        } else {
+            bytesIn.coerceAtLeast(0) + bytesOut.coerceAtLeast(0)
+        }
 }
 
 /**

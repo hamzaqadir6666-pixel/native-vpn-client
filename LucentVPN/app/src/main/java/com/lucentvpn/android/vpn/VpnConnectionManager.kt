@@ -9,6 +9,7 @@ import com.lucentvpn.android.data.SettingsStore
 import com.lucentvpn.android.data.model.VpnServer
 import com.lucentvpn.android.data.source.ServerSourceException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -50,8 +51,8 @@ class VpnConnectionManager(
      * observes this, launches it, and reports back via [onConsentResult].
      */
     private val _consentRequests = MutableSharedFlow<Intent>(
-        replay = 0,
-        extraBufferCapacity = 1,
+        replay = 1,
+        extraBufferCapacity = 0,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val consentRequests: SharedFlow<Intent> = _consentRequests.asSharedFlow()
@@ -89,7 +90,20 @@ class VpnConnectionManager(
     fun connect(pinnedServerId: String? = null) {
         activeJob?.cancel()
         activeJob = scope.launch {
-            connectMutex.withLock { runConnect(pinnedServerId) }
+            connectMutex.withLock {
+                if (_state.value is ConnectionState.Connected ||
+                    _state.value is ConnectionState.Connecting ||
+                    engine.engineState.value !is VpnEngine.EngineState.Stopped
+                ) {
+                    userInitiatedDisconnect = true
+                    _state.value = ConnectionState.Disconnecting
+                    engine.stop()
+                    withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
+                        engine.engineState.first { it is VpnEngine.EngineState.Stopped }
+                    }
+                }
+                runConnect(pinnedServerId)
+            }
         }
     }
 
@@ -97,15 +111,17 @@ class VpnConnectionManager(
         userInitiatedDisconnect = true
         activeJob?.cancel()
         activeJob = scope.launch {
-            _state.value = ConnectionState.Disconnecting
-            engine.stop()
-            // Wait for the engine to actually report it is down, but never hang
-            // the UI on a wedged engine.
-            withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
-                engine.engineState.first { it is VpnEngine.EngineState.Stopped }
+            connectMutex.withLock {
+                _state.value = ConnectionState.Disconnecting
+                engine.stop()
+                // Wait for the engine to actually report it is down, but never hang
+                // the UI on a wedged engine.
+                withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
+                    engine.engineState.first { it is VpnEngine.EngineState.Stopped }
+                }
+                currentServer = null
+                _state.value = ConnectionState.Idle
             }
-            currentServer = null
-            _state.value = ConnectionState.Idle
         }
     }
 
@@ -123,7 +139,9 @@ class VpnConnectionManager(
     }
 
     /** Called by the Activity after the system consent dialog closes. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun onConsentResult(granted: Boolean) {
+        _consentRequests.resetReplayCache()
         pendingConsent?.complete(granted)
         pendingConsent = null
     }
@@ -339,6 +357,7 @@ class VpnConnectionManager(
      *
      * @return true when we may create a tunnel.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun ensureConsent(): Boolean {
         val intent = engine.consentIntent() ?: return true
 
@@ -347,17 +366,18 @@ class VpnConnectionManager(
             stage = ConnectionState.Connecting.Stage.AWAITING_PERMISSION,
         )
 
+        pendingConsent?.cancel()
         val deferred = CompletableDeferred<Boolean>()
         pendingConsent = deferred
+        _consentRequests.emit(intent)
 
-        if (!_consentRequests.tryEmit(intent)) {
-            // No Activity is listening, so we cannot obtain consent right now.
-            pendingConsent = null
-            return false
+        return try {
+            // Replay keeps this request available across Activity recreation.
+            withTimeoutOrNull(CONSENT_TIMEOUT_MS) { deferred.await() } ?: false
+        } finally {
+            if (pendingConsent === deferred) pendingConsent = null
+            _consentRequests.resetReplayCache()
         }
-
-        // If the user backgrounds the dialog forever, do not leak the attempt.
-        return withTimeoutOrNull(CONSENT_TIMEOUT_MS) { deferred.await() } ?: false
     }
 
     private fun fail(error: VpnError, server: VpnServer?) {

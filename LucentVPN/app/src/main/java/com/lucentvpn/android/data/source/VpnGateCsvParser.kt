@@ -1,165 +1,138 @@
 package com.lucentvpn.android.data.source
 
-import android.util.Base64
 import com.lucentvpn.android.data.model.VpnServer
+import java.util.Base64
 
-/**
- * Parser for the VPN Gate public relay CSV.
- *
- * The document looks like this:
- *
- * ```
- * *vpn_servers
- * #HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,...,OpenVPN_ConfigData_Base64
- * vpn481923,219.100.37.1,21344,9,48211008,Japan,JP,...,<base64>
- * *
- * ```
- *
- * Columns are resolved **by header name**, never by fixed index, so the parser
- * keeps working if VPN Gate reorders or adds columns. Rows that are truncated,
- * unparseable, or missing a usable OpenVPN profile are skipped rather than
- * failing the whole refresh -- a malformed row is normal in a volunteer network.
- */
+/** Strict, row-tolerant parser for VPN Gate's public relay CSV. */
 object VpnGateCsvParser {
+    private const val MAX_CONFIG_BYTES = 512 * 1024
 
-    private const val COL_HOST = "hostname"
-    private const val COL_IP = "ip"
-    private const val COL_SCORE = "score"
-    private const val COL_PING = "ping"
-    private const val COL_SPEED = "speed"
-    private const val COL_COUNTRY_LONG = "countrylong"
-    private const val COL_COUNTRY_SHORT = "countryshort"
-    private const val COL_SESSIONS = "numvpnsessions"
-    private const val COL_UPTIME = "uptime"
-    private const val COL_LOG_TYPE = "logtype"
-    private const val COL_OPERATOR = "operator"
-    private const val COL_CONFIG = "openvpn_configdata_base64"
-
-    /**
-     * @return every row that yielded a dialable relay. Never throws for bad
-     *   rows; throws only when the document itself has no usable header.
-     */
     fun parse(csv: String): List<VpnServer> {
-        val lines = csv.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it != "*vpn_servers" && it != "*" }
-            .toList()
+        val records = parseCsv(csv)
+        val headerIndex = records.indexOfFirst { it.firstOrNull()?.trim()?.startsWith("#HostName") == true }
+        if (headerIndex < 0) throw malformed("VPN Gate response contained no column header")
 
-        val headerLine = lines.firstOrNull { it.startsWith("#") }
-            ?: throw ServerSourceException(
-                "VPN Gate response contained no column header",
-                ServerSourceException.Reason.MALFORMED_RESPONSE,
-            )
-
-        val columns = headerLine.removePrefix("#")
-            .split(',')
-            .map { it.trim().lowercase() }
-
-        val index = columns.withIndex().associate { (i, name) -> name to i }
-
-        // Without a host and a config there is nothing we could ever dial.
-        if (!index.containsKey(COL_CONFIG) || !index.containsKey(COL_HOST)) {
-            throw ServerSourceException(
-                "VPN Gate header is missing the host or config column",
-                ServerSourceException.Reason.MALFORMED_RESPONSE,
-            )
+        val names = records[headerIndex].mapIndexed { index, value ->
+            (if (index == 0) value.removePrefix("#") else value).trim().lowercase()
+        }
+        val columns = names.withIndex().associate { it.value to it.index }
+        if (columns["hostname"] == null || columns["openvpn_configdata_base64"] == null) {
+            throw malformed("VPN Gate header is missing the host or config column")
         }
 
-        val headerPosition = lines.indexOf(headerLine)
-        val seenHosts = HashSet<String>()
-
-        return lines.asSequence()
-            .drop(headerPosition + 1)
-            .filterNot { it.startsWith("#") || it.startsWith("*") }
-            .mapNotNull { row -> parseRow(row, index) }
-            // A relay occasionally appears twice in one document.
-            .filter { seenHosts.add(it.id) }
+        return records.asSequence()
+            .drop(headerIndex + 1)
+            .mapNotNull { parseRow(it, columns) }
+            .distinctBy { it.id.lowercase() }
             .toList()
     }
 
-    private fun parseRow(row: String, index: Map<String, Int>): VpnServer? {
-        val fields = row.split(',')
+    private fun parseRow(fields: List<String>, columns: Map<String, Int>): VpnServer? {
+        fun field(name: String) = columns[name]?.let(fields::getOrNull)?.trim()?.takeIf(String::isNotEmpty)
 
-        fun field(name: String): String? {
-            val i = index[name] ?: return null
-            return fields.getOrNull(i)?.trim()?.takeIf { it.isNotEmpty() }
-        }
+        val host = field("hostname") ?: return null
+        val ip = field("ip") ?: return null
+        if (!HOST_PATTERN.matches(host) || !IPV4_PATTERN.matches(ip)) return null
 
-        val host = field(COL_HOST) ?: return null
-        val ip = field(COL_IP) ?: return null
-        val rawConfig = field(COL_CONFIG) ?: return null
-
-        val config = decodeConfig(rawConfig) ?: return null
-        if (!isDialable(config)) return null
-
-        val countryCode = field(COL_COUNTRY_SHORT)?.uppercase()?.take(2).orEmpty()
+        val config = decodeConfig(field("openvpn_configdata_base64") ?: return null) ?: return null
+        val remote = validatedRemote(config) ?: return null
+        val countryCode = field("countryshort")?.uppercase()?.takeIf { it.matches(Regex("[A-Z]{2}")) }.orEmpty()
 
         return VpnServer(
-            id = host,
+            id = host.lowercase(),
             hostName = host,
             ipAddress = ip,
-            countryName = field(COL_COUNTRY_LONG) ?: countryCode.ifEmpty { "Unknown" },
+            countryName = field("countrylong") ?: countryCode.ifEmpty { "Unknown" },
             countryCode = countryCode,
-            reportedPingMs = field(COL_PING)?.toIntOrNull() ?: -1,
-            speedBps = field(COL_SPEED)?.toLongOrNull() ?: 0L,
-            sessions = field(COL_SESSIONS)?.toIntOrNull() ?: 0,
-            uptimeMs = field(COL_UPTIME)?.toLongOrNull() ?: 0L,
-            logPolicy = field(COL_LOG_TYPE) ?: "unknown",
-            operator = field(COL_OPERATOR) ?: "unknown",
-            score = field(COL_SCORE)?.toLongOrNull() ?: 0L,
+            reportedPingMs = field("ping")?.toIntOrNull()?.takeIf { it >= 0 } ?: -1,
+            speedBps = field("speed")?.toLongOrNull()?.coerceAtLeast(0) ?: 0,
+            sessions = field("numvpnsessions")?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+            uptimeMs = field("uptime")?.toLongOrNull()?.coerceAtLeast(0) ?: 0,
+            logPolicy = field("logtype") ?: "unknown",
+            operator = field("operator") ?: "unknown",
+            score = field("score")?.toLongOrNull()?.coerceAtLeast(0) ?: 0,
             openVpnConfig = config,
-            transport = detectTransport(config),
+            transport = remote.transport,
         )
     }
 
-    private fun decodeConfig(base64: String): String? = try {
-        // The column is standard base64, but tolerate URL-safe padding variants.
-        val bytes = Base64.decode(base64, Base64.DEFAULT)
-        if (bytes.isEmpty()) null else String(bytes, Charsets.UTF_8)
-    } catch (_: IllegalArgumentException) {
-        null
-    }
+    private fun decodeConfig(encoded: String): String? = runCatching {
+        val compact = encoded.filterNot(Char::isWhitespace)
+        val bytes = Base64.getDecoder().decode(compact)
+        if (bytes.isEmpty() || bytes.size > MAX_CONFIG_BYTES) return null
+        bytes.toString(Charsets.UTF_8).takeIf { '\u0000' !in it }
+    }.getOrNull()
 
-    /**
-     * A profile is only worth keeping if it names a remote and carries the CA
-     * material inline. Anything that would make ics-openvpn prompt for an
-     * external file is rejected here so it can never reach the connect path.
-     */
-    private fun isDialable(config: String): Boolean {
+    private data class Remote(val transport: VpnServer.Transport)
+
+    private fun validatedRemote(config: String): Remote? {
+        val directives = config.lineSequence()
+            .map { it.substringBefore('#').substringBefore(';').trim() }
+            .filter(String::isNotEmpty)
+            .toList()
+        val remoteParts = directives.firstOrNull { it.startsWith("remote ", ignoreCase = true) }
+            ?.split(Regex("\\s+")) ?: return null
+        if (remoteParts.size < 3) return null
+        val remoteHost = remoteParts[1]
+        val port = remoteParts[2].toIntOrNull() ?: return null
+        if (!HOST_PATTERN.matches(remoteHost) || port !in 1..65535) return null
+
         val lower = config.lowercase()
-        val hasRemote = lower.lineSequence().any { it.trimStart().startsWith("remote ") }
-        val hasInlineCa = "<ca>" in lower
-        val referencesExternalFile = lower.lineSequence().any {
-            val line = it.trimStart()
-            (line.startsWith("ca ") || line.startsWith("cert ") || line.startsWith("key ")) &&
-                !line.contains("[[INLINE]]")
-        }
-        return hasRemote && hasInlineCa && !referencesExternalFile
+        if (!lower.contains("<ca>") || !lower.contains("</ca>")) return null
+        if (directives.any { line ->
+                val normalized = line.lowercase()
+                listOf("ca ", "cert ", "key ", "tls-auth ", "tls-crypt ").any(normalized::startsWith) &&
+                    !normalized.contains("[[inline]]")
+            }
+        ) return null
+
+        val proto = remoteParts.getOrNull(3)
+            ?: directives.firstOrNull { it.startsWith("proto ", true) }?.substringAfter(' ')
+        return Remote(if (proto?.contains("tcp", true) == true) VpnServer.Transport.TCP else VpnServer.Transport.UDP)
     }
 
-    private fun detectTransport(config: String): VpnServer.Transport {
-        config.lineSequence().forEach { raw ->
-            val line = raw.trim().lowercase()
-            if (line.startsWith("proto ")) {
-                return if (line.contains("tcp")) {
-                    VpnServer.Transport.TCP
-                } else {
-                    VpnServer.Transport.UDP
+    /** Handles quoted fields, escaped quotes, CRLF, and newlines inside quoted fields. */
+    private fun parseCsv(text: String): List<List<String>> {
+        val rows = mutableListOf<List<String>>()
+        val row = mutableListOf<String>()
+        val field = StringBuilder()
+        var quoted = false
+        var index = 0
+        while (index < text.length) {
+            val char = text[index]
+            when {
+                char == '"' && quoted && text.getOrNull(index + 1) == '"' -> {
+                    field.append('"')
+                    index++
                 }
-            }
-            // "remote <host> <port> <proto>"
-            if (line.startsWith("remote ")) {
-                val parts = line.split(Regex("\\s+"))
-                if (parts.size >= 4) {
-                    return if (parts[3].startsWith("tcp")) {
-                        VpnServer.Transport.TCP
-                    } else {
-                        VpnServer.Transport.UDP
-                    }
+                char == '"' -> quoted = !quoted
+                char == ',' && !quoted -> {
+                    row += field.toString()
+                    field.clear()
                 }
+                (char == '\n' || char == '\r') && !quoted -> {
+                    if (char == '\r' && text.getOrNull(index + 1) == '\n') index++
+                    row += field.toString()
+                    field.clear()
+                    if (row.any(String::isNotBlank)) rows += row.toList()
+                    row.clear()
+                }
+                else -> field.append(char)
             }
+            index++
         }
-        // OpenVPN's own default when no proto is given.
-        return VpnServer.Transport.UDP
+        if (field.isNotEmpty() || row.isNotEmpty()) {
+            row += field.toString()
+            if (row.any(String::isNotBlank)) rows += row
+        }
+        return rows
     }
+
+    private fun malformed(message: String) = ServerSourceException(
+        message,
+        ServerSourceException.Reason.MALFORMED_RESPONSE,
+    )
+
+    private val HOST_PATTERN = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
+    private val IPV4_PATTERN = Regex("(?:\\d{1,3}\\.){3}\\d{1,3}")
 }
