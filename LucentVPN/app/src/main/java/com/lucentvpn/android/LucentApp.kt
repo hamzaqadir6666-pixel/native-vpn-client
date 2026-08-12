@@ -6,6 +6,7 @@ import com.lucentvpn.android.data.NetworkMonitor
 import com.lucentvpn.android.data.ServerRepository
 import com.lucentvpn.android.data.SettingsStore
 import com.lucentvpn.android.vpn.OpenVpnEngine
+import com.lucentvpn.android.vpn.TunnelVerifier
 import com.lucentvpn.android.vpn.VpnConnectionManager
 import de.blinkt.openvpn.core.PRNGFixes
 import de.blinkt.openvpn.core.StatusListener
@@ -53,6 +54,7 @@ class LucentApp : Application() {
             repository = serverRepository,
             settings = settingsStore,
             networkMonitor = networkMonitor,
+            tunnelVerifier = TunnelVerifier(this),
         )
     }
 

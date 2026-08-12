@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lucentvpn.android.R
+import com.lucentvpn.android.data.ServerRepository
 import com.lucentvpn.android.data.model.VpnServer
 import com.lucentvpn.android.ui.Formatters
 import com.lucentvpn.android.ui.LucentViewModel
@@ -73,6 +74,7 @@ fun HomeScreen(
     val stats by viewModel.stats.collectAsState()
     val server by viewModel.displayServer.collectAsState()
     val isOnline by viewModel.isOnline.collectAsState()
+    val cacheFreshness by viewModel.cacheFreshness.collectAsState()
 
     Scaffold { insets ->
         Column(
@@ -89,6 +91,14 @@ fun HomeScreen(
                 exit = fadeOut(),
             ) {
                 OfflineBanner()
+            }
+
+            AnimatedVisibility(
+                visible = isOnline && cacheFreshness == ServerRepository.CacheFreshness.STALE,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                StaleRelayBanner()
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -148,6 +158,20 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun StaleRelayBanner() {
+    Text(
+        text = stringResource(R.string.servers_stale_warning),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    )
 }
 
 @Composable
@@ -458,11 +482,16 @@ private fun ConnectionState.headlineRes(): Int = when (this) {
     ConnectionState.Disconnecting -> R.string.state_disconnecting
     is ConnectionState.Failed -> R.string.state_ready
     is ConnectionState.Connecting -> when (stage) {
+        ConnectionState.Connecting.Stage.CHECKING_NETWORK -> R.string.state_checking_network
+        ConnectionState.Connecting.Stage.REFRESHING_SERVERS -> R.string.state_refreshing
         ConnectionState.Connecting.Stage.SELECTING_SERVER -> R.string.state_selecting
         ConnectionState.Connecting.Stage.AWAITING_PERMISSION -> R.string.state_awaiting_permission
+        ConnectionState.Connecting.Stage.PREPARING_PROFILE -> R.string.state_preparing_profile
         ConnectionState.Connecting.Stage.STARTING_ENGINE -> R.string.state_starting_engine
         ConnectionState.Connecting.Stage.CONTACTING_SERVER -> R.string.state_contacting
         ConnectionState.Connecting.Stage.AUTHENTICATING -> R.string.state_authenticating
         ConnectionState.Connecting.Stage.ESTABLISHING_TUNNEL -> R.string.state_establishing
+        ConnectionState.Connecting.Stage.VERIFYING_TUNNEL -> R.string.state_verifying
+        ConnectionState.Connecting.Stage.RETRYING -> R.string.state_retrying
     }
 }
