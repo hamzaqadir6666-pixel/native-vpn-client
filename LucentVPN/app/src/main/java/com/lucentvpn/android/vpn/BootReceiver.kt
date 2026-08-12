@@ -39,26 +39,32 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        // goAsync() is not used: the work below only needs to survive long
-        // enough to read one preference and hand off to the app-scoped manager,
-        // which owns its own lifetime.
+        val pendingResult = goAsync()
         app.appScope.launch {
-            val settings = app.settingsStore.settings.first()
-            if (!settings.startOnBoot) return@launch
+            try {
+                val settings = app.settingsStore.settings.first()
+                if (!settings.startOnBoot) return@launch
+                if (!app.networkMonitor.queryOnline()) {
+                    Log.i(TAG, "No validated network on boot; skipping reconnect")
+                    return@launch
+                }
 
-            Log.i(TAG, "Reconnecting after $action")
+                Log.i(TAG, "Reconnecting after $action")
 
-            // The relay list is almost certainly cold this early in boot.
-            val hadCache = app.serverRepository.loadCache()
-            if (!hadCache) {
-                runCatching { app.serverRepository.refresh(probeLatency = false) }
-                    .onFailure {
-                        Log.w(TAG, "Could not load relays on boot", it)
-                        return@launch
-                    }
+                // The relay list is almost certainly cold this early in boot.
+                val hadCache = app.serverRepository.loadCache()
+                if (!hadCache) {
+                    runCatching { app.serverRepository.refresh(probeLatency = false) }
+                        .onFailure {
+                            Log.w(TAG, "Could not load relays on boot", it)
+                            return@launch
+                        }
+                }
+
+                app.connectionManager.connect(settings.pinnedServerId)
+            } finally {
+                pendingResult.finish()
             }
-
-            app.connectionManager.connect(settings.pinnedServerId)
         }
     }
 

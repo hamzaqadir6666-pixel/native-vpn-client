@@ -156,6 +156,10 @@ class LucentViewModel(application: Application) : AndroidViewModel(application) 
             _listError.value = null
             try {
                 repository.refresh(probeLatency = true)
+                val pinned = settingsStore.settings.first().pinnedServerId
+                if (pinned != null && repository.serverById(pinned) == null) {
+                    settingsStore.setPinnedServer(null)
+                }
             } catch (e: ServerSourceException) {
                 _listError.value = when (e.reason) {
                     ServerSourceException.Reason.NO_NETWORK -> VpnError.NO_NETWORK

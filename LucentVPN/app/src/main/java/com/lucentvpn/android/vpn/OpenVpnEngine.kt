@@ -62,6 +62,12 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
 
     private var lastByteCountAt = 0L
 
+    @Volatile
+    private var activeProfileUuid: String? = null
+
+    @Volatile
+    private var callbackProfileUuid: String? = null
+
     // -----------------------------------------------------------------------
     // Engine callbacks
     // -----------------------------------------------------------------------
@@ -75,10 +81,24 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
             level: ConnectionStatus?,
             intent: Intent?,
         ) {
+            val expected = activeProfileUuid
+            val reported = callbackProfileUuid
+            if (expected != null && reported != null && expected != reported) {
+                Log.d(TAG, "Ignoring callback from superseded profile $reported")
+                return
+            }
             _engineState.value = translate(state, logmessage, level)
+            if (_engineState.value is VpnEngine.EngineState.Stopped ||
+                _engineState.value is VpnEngine.EngineState.Failed
+            ) {
+                _stats.value = TunnelStats()
+                lastByteCountAt = 0L
+            }
         }
 
-        override fun setConnectedVPN(uuid: String?) = Unit
+        override fun setConnectedVPN(uuid: String?) {
+            callbackProfileUuid = uuid
+        }
     }
 
     private val byteCountListener = VpnStatus.ByteCountListener { inBytes, outBytes, diffIn, diffOut ->
@@ -95,11 +115,13 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
             ((now - previous) / 1000.0).coerceAtLeast(0.25)
         }
 
+        val safeIn = inBytes.coerceAtLeast(0)
+        val safeOut = outBytes.coerceAtLeast(0)
         _stats.value = TunnelStats(
-            bytesIn = inBytes,
-            bytesOut = outBytes,
-            downstreamBps = (diffIn / intervalSeconds).toLong().coerceAtLeast(0),
-            upstreamBps = (diffOut / intervalSeconds).toLong().coerceAtLeast(0),
+            bytesIn = safeIn,
+            bytesOut = safeOut,
+            downstreamBps = if (diffIn < 0) 0 else (diffIn / intervalSeconds).toLong().coerceAtLeast(0),
+            upstreamBps = if (diffOut < 0) 0 else (diffOut / intervalSeconds).toLong().coerceAtLeast(0),
         )
     }
 
@@ -207,6 +229,8 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
         _engineState.value = VpnEngine.EngineState.Starting
 
         val profile = buildProfile(server, options)
+        activeProfileUuid = profile.uuidString
+        callbackProfileUuid = null
 
         // ProfileManager persists to the app's private storage; the engine's
         // service reads the profile back by UUID after a process restart.
@@ -217,9 +241,9 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
 
         Log.i(TAG, "Starting tunnel to ${server.hostName} (${server.transport})")
 
-        // API NOTE: `startOpenVpn(profile, context, startReason)` gained its
-        // third parameter in 2021. On older submodule pins, drop the reason.
-        VPNLaunchHelper.startOpenVpn(profile, appContext, START_REASON)
+        // The final flag asks the pinned engine to replace any still-running
+        // profile, preventing two VpnService sessions from racing for the TUN.
+        VPNLaunchHelper.startOpenVpn(profile, appContext, START_REASON, true)
     }
 
     /**
@@ -297,6 +321,10 @@ class OpenVpnEngine(private val appContext: Context) : VpnEngine {
 
     override fun stop() {
         stopRequested = true
+        activeProfileUuid = null
+        callbackProfileUuid = null
+        lastByteCountAt = 0L
+        _stats.value = TunnelStats()
         _engineState.value = VpnEngine.EngineState.Stopped
 
         ProfileManager.setConntectedVpnProfileDisconnected(appContext)

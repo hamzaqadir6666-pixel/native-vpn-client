@@ -34,7 +34,7 @@ object Formatters {
 
     /** e.g. "8.4 Mbps". Input is bytes per second. */
     fun rate(bytesPerSecond: Long): String {
-        val bits = bytesPerSecond * 8.0
+        val bits = bytesPerSecond.coerceAtLeast(0).toDouble() * 8.0
 
         return when {
             bits < 1_000 -> String.format(Locale.US, "%.0f bps", bits)

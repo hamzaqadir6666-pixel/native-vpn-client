@@ -17,11 +17,6 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        // ics-openvpn's :main module declares a flavour dimension called
-        // "implementation" with the flavours "ovpn23" (full openvpn3 core) and
-        // "skeleton" (no native code). We always want the real engine.
-        missingDimensionStrategy("implementation", "ovpn23")
-
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -73,7 +68,7 @@ android {
 dependencies {
     // ---- The VPN tunnel engine -------------------------------------------
     // Compiled from source into this APK. Provides de.blinkt.openvpn.*
-    implementation(project(":openvpn"))
+    implementation(project(":openvpn-engine"))
 
     // ---- AndroidX / Compose ---------------------------------------------
     implementation("androidx.core:core-ktx:1.15.0")
